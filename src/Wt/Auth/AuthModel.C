@@ -19,7 +19,15 @@
 #include "js/AuthModel.min.js"
 #endif
 
+#include "Wt/WDllDefs.h"
+
 #include <memory>
+
+#ifdef WT_CXX11
+#define AUTO_PTR std::unique_ptr
+#else
+#define AUTO_PTR std::auto_ptr
+#endif
 
 namespace Wt {
 
@@ -156,7 +164,7 @@ bool AuthModel::validateField(Field field)
 
 bool AuthModel::validate()
 {
-  std::auto_ptr<AbstractUserDatabase::Transaction>
+  AUTO_PTR<AbstractUserDatabase::Transaction>
     t(users().startTransaction());
 
   bool result = WFormModel::validate();
@@ -175,7 +183,9 @@ void AuthModel::setRememberMeCookie(const User& user)
   app->setCookie(s->authTokenCookieName(),
 		 s->createAuthToken(user),
 		 s->authTokenValidity() * 60,
-		 s->authTokenCookieDomain());
+		 s->authTokenCookieDomain(),
+		 "",
+		 app->environment().urlScheme() == "https");
 }
 
 bool AuthModel::login(Login& login)
@@ -237,11 +247,11 @@ User AuthModel::processAuthToken()
 	 * Only extend the validity from what we had currently.
 	 */
 	app->setCookie(baseAuth()->authTokenCookieName(), result.newToken(),
-		       result.newTokenValidity());
+		       result.newTokenValidity(), "", "", app->environment().urlScheme() == "https");
 
 	return result.user();
       case AuthTokenResult::Invalid:
-	app->setCookie(baseAuth()->authTokenCookieName(),std::string(), 0);
+	app->setCookie(baseAuth()->authTokenCookieName(),std::string(), 0, "", "", app->environment().urlScheme() == "https");
 
 	return User();
       }

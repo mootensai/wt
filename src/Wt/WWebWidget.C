@@ -25,6 +25,7 @@
 #ifndef WT_DEBUG_JS
 #include "js/WWebWidget.min.js"
 #include "js/ToolTip.min.js"
+#include "js/ScrollVisibility.min.js"
 #endif
 
 #ifdef max
@@ -52,7 +53,7 @@ const char *WWebWidget::FOCUS_SIGNAL = "focus";
 const char *WWebWidget::BLUR_SIGNAL = "blur";
 
 #ifndef WT_TARGET_JAVA
-const std::bitset<31> WWebWidget::AllChangeFlags = std::bitset<31>()
+const std::bitset<35> WWebWidget::AllChangeFlags = std::bitset<35>()
   .set(BIT_HIDDEN_CHANGED)
   .set(BIT_GEOMETRY_CHANGED)
   .set(BIT_FLOAT_SIDE_CHANGED)
@@ -64,7 +65,8 @@ const std::bitset<31> WWebWidget::AllChangeFlags = std::bitset<31>()
   .set(BIT_HEIGHT_CHANGED)
   .set(BIT_DISABLED_CHANGED)
   .set(BIT_ZINDEX_CHANGED)
-  .set(BIT_TABINDEX_CHANGED);
+  .set(BIT_TABINDEX_CHANGED)
+  .set(BIT_SCROLL_VISIBILITY_CHANGED);
 #endif // WT_TARGET_JAVA
 
 WWebWidget::TransientImpl::TransientImpl()
@@ -110,7 +112,7 @@ WWebWidget::OtherImpl::JavaScriptStatement::JavaScriptStatement
     data(aData)
 { }
 
-WWebWidget::OtherImpl::OtherImpl(WWebWidget *self)
+WWebWidget::OtherImpl::OtherImpl(WWebWidget *const self)
   : id_(0),
     attributes_(0),
     jsMembers_(0),
@@ -119,8 +121,13 @@ WWebWidget::OtherImpl::OtherImpl(WWebWidget *self)
     tabIndex_(std::numeric_limits<int>::min()),
     dropSignal_(0),
     acceptedDropMimeTypes_(0),
-    childrenChanged_(self)
-{ }
+    childrenChanged_(self),
+    scrollVisibilityMargin_(0),
+    scrollVisibilityChanged_(self),
+    jsScrollVisibilityChanged_(self, "scrollVisibilityChanged")
+{
+  jsScrollVisibilityChanged_.connect(self, &WWebWidget::jsScrollVisibilityChanged);
+}
 
 WWebWidget::OtherImpl::~OtherImpl()
 {
@@ -299,6 +306,13 @@ void WWebWidget::setDecorationStyle(const WCssDecorationStyle& style)
 std::string WWebWidget::renderRemoveJs(bool recursive)
 {
   std::string result;
+
+  if (isRendered() && scrollVisibilityEnabled()) {
+    result += WT_CLASS ".scrollVisibility.remove("
+	+ jsStringLiteral(id()) + ");";
+    flags_.set(BIT_SCROLL_VISIBILITY_CHANGED);
+    flags_.reset(BIT_SCROLL_VISIBILITY_LOADED);
+  }
 
   if (children_)
     for (unsigned i = 0; i < children_->size(); ++i)
@@ -1057,6 +1071,8 @@ void WWebWidget::setHidden(bool hidden, const WAnimation& animation)
   if (canOptimizeUpdates() && (animation.empty() && hidden == isHidden()))
     return;
 
+  bool wasVisible = isVisible();
+
   flags_.set(BIT_HIDDEN, hidden);
   flags_.set(BIT_HIDDEN_CHANGED);
 
@@ -1067,6 +1083,13 @@ void WWebWidget::setHidden(bool hidden, const WAnimation& animation)
       transientImpl_ = new TransientImpl();
     transientImpl_->animation_ = animation;
   }
+
+  bool shouldBeVisible = !hidden;
+  if (shouldBeVisible && parent())
+    shouldBeVisible = parent()->isVisible();
+
+  if (!canOptimizeUpdates() || shouldBeVisible != wasVisible)
+    propagateSetVisible(shouldBeVisible);
 
   WApplication::instance()
     ->session()->renderer().updateFormObjects(this, true);
@@ -1109,7 +1132,8 @@ bool WWebWidget::isVisible() const
     if (parent())
       return parent()->isVisible();
     else
-      return loaded();
+      return this == WApplication::instance()->domRoot() ||
+	     this == WApplication::instance()->domRoot2();
 }
 
 void WWebWidget::setDisabled(bool disabled)
@@ -1142,6 +1166,16 @@ void WWebWidget::propagateSetEnabled(bool enabled)
       WWidget *c = (*children_)[i];
       if (!c->isDisabled())
 	c->webWidget()->propagateSetEnabled(enabled);
+    }
+}
+
+void WWebWidget::propagateSetVisible(bool visible)
+{
+  if (children_)
+    for (unsigned i = 0; i < children_->size(); ++i) {
+      WWidget *c = (*children_)[i];
+      if (!c->isHidden())
+	c->webWidget()->propagateSetVisible(visible);
     }
 }
 
@@ -1186,9 +1220,6 @@ void WWebWidget::childAdded(WWidget *child)
   WWebWidget *ww = child->webWidget();
   if (ww)
     ww->gotParent();
-
-  if (flags_.test(BIT_LOADED))
-    doLoad(child);
 
   WApplication::instance()
     ->session()->renderer().updateFormObjects(this, false);
@@ -1827,6 +1858,37 @@ void WWebWidget::updateDom(DomElement& element, bool all)
 
     flags_.reset(BIT_TABINDEX_CHANGED);
   }
+
+  if (all || flags_.test(BIT_SCROLL_VISIBILITY_CHANGED)) {
+    const char *SCROLL_JS = "js/ScrollVisibility.js";
+
+    if (!app) app = WApplication::instance();
+
+    if (!app->javaScriptLoaded(SCROLL_JS) && scrollVisibilityEnabled()) {
+      LOAD_JAVASCRIPT(app, SCROLL_JS, "ScrollVisibility", wtjs3);
+      WStringStream ss;
+      ss << "if (!" WT_CLASS ".scrollVisibility) {"
+	    WT_CLASS ".scrollVisibility = new ";
+      ss << WT_CLASS ".ScrollVisibility(" << app->javaScriptClass() + "); }";
+      element.callJavaScript(ss.str());
+    }
+
+    if (scrollVisibilityEnabled()) {
+      WStringStream ss;
+      ss << WT_CLASS ".scrollVisibility.add({";
+      ss << "el:" << jsRef() << ',';
+      ss << "margin:" << scrollVisibilityMargin() << ',';
+      ss << "visible:" << isScrollVisible();
+      ss << "});";
+      element.callJavaScript(ss.str());
+      flags_.set(BIT_SCROLL_VISIBILITY_LOADED);
+    } else if (flags_.test(BIT_SCROLL_VISIBILITY_LOADED)) {
+      element.callJavaScript(WT_CLASS ".scrollVisibility.remove("
+			     + jsStringLiteral(id()) + ");");
+      flags_.reset(BIT_SCROLL_VISIBILITY_LOADED);
+    }
+    flags_.reset(BIT_SCROLL_VISIBILITY_CHANGED);
+  }
   
   renderOk();
 
@@ -2049,6 +2111,7 @@ void WWebWidget::propagateRenderOk(bool deep)
   flags_.reset(BIT_DISABLED_CHANGED);
   flags_.reset(BIT_ZINDEX_CHANGED);
   flags_.reset(BIT_TABINDEX_CHANGED);
+  flags_.reset(BIT_SCROLL_VISIBILITY_CHANGED);
 #endif
 
   renderOk();
@@ -2547,6 +2610,64 @@ bool WWebWidget::removeScript(WString& text)
 #else
   return true;
 #endif
+}
+
+bool WWebWidget::scrollVisibilityEnabled() const
+{
+  return flags_.test(BIT_SCROLL_VISIBILITY_ENABLED);
+}
+
+void WWebWidget::setScrollVisibilityEnabled(bool enabled)
+{
+  if (enabled && !otherImpl_)
+    otherImpl_ = new OtherImpl(this);
+
+  if (scrollVisibilityEnabled() != enabled) {
+    flags_.set(BIT_SCROLL_VISIBILITY_ENABLED, enabled);
+    flags_.set(BIT_SCROLL_VISIBILITY_CHANGED);
+    repaint();
+  }
+}
+
+int WWebWidget::scrollVisibilityMargin() const
+{
+  if (!otherImpl_)
+    return 0;
+  else
+    return otherImpl_->scrollVisibilityMargin_;
+}
+
+void WWebWidget::setScrollVisibilityMargin(int margin)
+{
+  if (scrollVisibilityMargin() != margin) {
+    if (!otherImpl_)
+      otherImpl_ = new OtherImpl(this);
+    otherImpl_->scrollVisibilityMargin_ = margin;
+    if (scrollVisibilityEnabled()) {
+      flags_.set(BIT_SCROLL_VISIBILITY_CHANGED);
+      repaint();
+    }
+  }
+}
+
+Signal<bool> &WWebWidget::scrollVisibilityChanged()
+{
+  if (!otherImpl_)
+    otherImpl_ = new OtherImpl(this);
+
+  return otherImpl_->scrollVisibilityChanged_;
+}
+
+bool WWebWidget::isScrollVisible() const
+{
+  return flags_.test(BIT_IS_SCROLL_VISIBLE);
+}
+
+void WWebWidget::jsScrollVisibilityChanged(bool visible)
+{
+  flags_.set(BIT_IS_SCROLL_VISIBLE, visible);
+  if (otherImpl_)
+    otherImpl_->scrollVisibilityChanged_.emit(visible);
 }
 
 }

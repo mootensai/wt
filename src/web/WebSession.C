@@ -101,7 +101,6 @@ WebSession::WebSession(WebController *controller,
   : type_(type),
     favicon_(favicon),
     state_(JustCreated),
-    useUrlRewriting_(true),
     sessionId_(sessionId),
     sessionIdChanged_(false),
     sessionIdCookieChanged_(false),
@@ -164,7 +163,7 @@ WebSession::WebSession(WebController *controller,
     sessionIdCookie_ = WRandom::generateId();
     sessionIdCookieChanged_ = true;
     renderer().setCookie("Wt" + sessionIdCookie_, "1", Wt::WDateTime(), "", "",
-			 false /* FIXME: or true ? */);
+			 env_->urlScheme() == "https");
   }
 }
 
@@ -373,11 +372,6 @@ std::string WebSession::sessionQuery() const
 void WebSession::init(const WebRequest& request)
 {
   env_->init(request);
-
-  Configuration& conf = controller_->configuration();
-  if (conf.sessionTracking() == Configuration::CookiesURL
-      && env_->supportsCookies())
-    useUrlRewriting_ = false;
 
   const std::string *hashE = request.getParameter("_");
 
@@ -633,7 +627,7 @@ std::string WebSession::appendInternalPath(const std::string& baseUrl,
 {
   if (internalPath.empty() || internalPath == "/")
     if (baseUrl.empty())
-      return "?";
+      return ".";
     else
       return baseUrl;
   else {
@@ -1283,7 +1277,7 @@ void WebSession::handleRequest(Handler& handler)
 	response->setStatus(200);
 	response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
 	response->addHeader("Access-Control-Max-Age", "1728000");
-	response->flush();
+	handler.flushResponse();
 
 	return;
       }
@@ -2899,6 +2893,13 @@ void WebSession::setPagePathInfo(const std::string& path)
     pagePathInfo_ = path;
 }
 
+bool WebSession::useUrlRewriting()
+{
+  Configuration& conf = controller_->configuration();
+  return !(conf.sessionTracking() == Configuration::CookiesURL &&
+	   env_->supportsCookies());
+}
+
 #ifndef WT_TARGET_JAVA
 void WebSession::generateNewSessionId()
 {
@@ -2911,17 +2912,16 @@ void WebSession::generateNewSessionId()
 
   LOG_INFO("new session id for " << oldId);
 
-  if (!useUrlRewriting_) {
+  if (!useUrlRewriting()) {
     std::string cookieName = env_->deploymentPath();
-    // FIXME secure ?
-    renderer().setCookie(cookieName, sessionId_, WDateTime(), "", "", true);
+    renderer().setCookie(cookieName, sessionId_, WDateTime(), "", "", env_->urlScheme() == "https");
   }
 
   if (controller_->configuration().sessionIdCookie()) {
     sessionIdCookie_ = WRandom::generateId();
     sessionIdCookieChanged_ = true;
     renderer().setCookie("Wt" + sessionIdCookie_, "1", WDateTime(), "", "",
-			 false /* FIXME or true ? */);
+			 env_->urlScheme() == "https");
   }
 }
 #endif // WT_TARGET_JAVA

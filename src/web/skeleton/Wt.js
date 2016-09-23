@@ -504,12 +504,27 @@ this.insertAt = function(p, c, pos) {
 
 this.remove = function(id)
 {
+  // TODO(Roel): what about removal?
   var e = WT.getElement(id);
   if (e) {
     WT.saveReparented(e);
     e.parentNode.removeChild(e);
   }
 };
+
+this.replaceWith = function(w1Id, $w2)
+{
+  var $w1 = $("#" + w1Id);
+  $w1.replaceWith($w2);
+
+  /* Reapply client-side validation, bootstrap applys validation classes
+     also outside the element into its ancestors */
+  if ($w2.get(0).wtValidate && WT.validate) {
+    setTimeout(function() { 
+      WT.validate($w2.get(0));
+    }, 0);
+  }
+}
 
 this.contains = function(w1, w2) {
   var p = w2.parentNode;
@@ -3202,7 +3217,7 @@ function sendUpdate() {
 
   var params = "_$_PARAMS_$_";
   if (params.length > 0)
-    data.result += '&' + params;
+    data.result += '&Wt-params=' + encodeURIComponent(params);
 
   if ((websocket.socket != null) &&
       (websocket.socket.readyState == 1) &&
@@ -3274,7 +3289,7 @@ function emit(object, config) {
       r = 0;
     else if (a === true)
       r = 1;
-    else if (a.toDateString)
+    else if (a && a.toDateString)
       r = a.toDateString();
     else
       r = a;
@@ -3536,6 +3551,76 @@ function setCloseMessage(m)
     window.onbeforeunload = null;
 };
 
+var firstCall = true;
+var globalEventsFunctions = null;
+var keyEvents = [ 'keydown', 'keyup', 'keypress' ];
+
+function updateGlobal(id) {
+  firstCall = false;
+  var domId;
+  if (id == null) {
+    domId = $('.Wt-domRoot').get(0).id
+  } else {
+    domId = id;
+  }
+
+  for (var i = 0; i < keyEvents.length ; ++i) {
+    var elemEvents = globalEventsFunctions ? globalEventsFunctions[domId] : null;
+    var eventFunc = null;
+
+    if (elemEvents) 
+      eventFunc = elemEvents[keyEvents[i]];
+
+    var bindEvent = function(evtfunc) {
+      return function(event) {
+	var g=event||window.event;
+	var t=g.target||g.srcElement;
+	if ((!t| WT.hasTag(t,'DIV')
+	  || WT.hasTag(t,'BODY')
+	    || WT.hasTag(t,'HTML'))) {
+	      var func = evtfunc;
+	      if(func)
+		func(event);
+	    }
+      };
+    };
+
+    if (eventFunc)
+      document['on' + keyEvents[i] ] = bindEvent(eventFunc);
+    else 
+      document['on' + keyEvents[i] ] = null;
+
+  }
+
+  // cleanup functions of widgets that do no longer exist
+  if (globalEventsFunctions) {
+    for (var i in globalEventsFunctions) {
+      if (!document.getElementById(i)) {
+	delete globalEventsFunctions[i];
+      }
+    }
+  }
+}
+
+function bindGlobal(event, id, f) {
+  var init = false;
+  if (!globalEventsFunctions) {
+    globalEventsFunctions = {};
+    init = true;
+  }
+
+  // Saves the event functions
+  if (!globalEventsFunctions[id])
+    globalEventsFunctions[id] = {};
+
+  globalEventsFunctions[id][event]=f;
+  if(init)
+    setTimeout(function() {
+      if(firstCall)
+	updateGlobal(null);
+    }, 0);
+}
+
 this._p_ = {
   ieAlternative : ieAlternative,
   loadScript : loadScript,
@@ -3569,6 +3654,8 @@ this._p_ = {
   setPage : setPage,
   setCloseMessage : setCloseMessage,
   setConnectionMonitor : setConnectionMonitor,
+  updateGlobal: updateGlobal,
+  bindGlobal: bindGlobal,
 
   propagateSize : propagateSize
 };

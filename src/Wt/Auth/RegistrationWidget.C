@@ -19,7 +19,15 @@
 #include "Wt/WText"
 #include "Wt/WTheme"
 
+#include "Wt/WDllDefs.h"
+
 #include <memory>
+
+#ifdef WT_CXX11
+#define AUTO_PTR std::unique_ptr
+#else
+#define AUTO_PTR std::auto_ptr
+#endif
 
 namespace Wt {
 
@@ -59,7 +67,7 @@ void RegistrationWidget::render(WFlags<RenderFlag> flags)
   WTemplateFormView::render(flags);
 }
 
-WFormWidget *RegistrationWidget::createFormWidget(WFormModel::Field field)
+WWidget *RegistrationWidget::createFormWidget(WFormModel::Field field)
 {
   WFormWidget *result = 0;
 
@@ -224,7 +232,7 @@ bool RegistrationWidget::validate()
 
 void RegistrationWidget::doRegister()
 {
-  std::auto_ptr<AbstractUserDatabase::Transaction>
+  AUTO_PTR<AbstractUserDatabase::Transaction>
     t(model_->users().startTransaction());
 
   updateModel(model_);

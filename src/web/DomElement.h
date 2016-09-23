@@ -32,6 +32,7 @@ enum Property { PropertyInnerHTML, PropertyAddedInnerHTML,
 		PropertyColSpan, PropertyRowSpan, PropertyReadOnly,
 		PropertyTabIndex, PropertyLabel,
 		PropertyClass,
+		PropertyPlaceholder,
 		PropertyStyle,
 		PropertyStyleWidthExpression,
 		PropertyStylePosition,
@@ -504,6 +505,8 @@ public:
    */
   std::string createVar() const;
 
+  void setGlobalUnfocused(bool b);
+
 private:
   struct EventHandler {
     std::string jsCode;
@@ -555,6 +558,7 @@ private:
   std::string  javaScriptEvenWhenDeleted_;
   mutable std::string var_;
   mutable bool declared_;
+  bool globalUnfocused_;
 
   AttributeMap    attributes_;
   AttributeSet    removedAttributes_;

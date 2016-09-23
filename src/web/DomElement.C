@@ -191,7 +191,8 @@ DomElement::DomElement(Mode mode, DomElementType type)
     insertBefore_(0),
     type_(type),
     numManipulations_(0),
-    timeOut_(-1)
+    timeOut_(-1),
+    globalUnfocused_(false)
 { }
 
 DomElement::~DomElement()
@@ -710,29 +711,21 @@ void DomElement::setJavaScriptEvent(EscapeOStream& out,
 {
   // events on the dom root container are events received by the whole
   // document when no element has focus
-  bool globalUnfocused = (id_ == app->domRoot()->id());
 
   int fid = nextId_++;
 
   out << "function f" << fid << "(event) { ";
 
-  if (globalUnfocused)
-    out << "var g=event||window.event; "
-      "var t=g.target||g.srcElement;"
-      "if ((!t||" WT_CLASS ".hasTag(t,'DIV') "
-      ""     "||" WT_CLASS ".hasTag(t,'BODY') "
-      ""     "||" WT_CLASS ".hasTag(t,'HTML'))) {";
-
   out << handler.jsCode;
-
-  if (globalUnfocused)
-    out << '}';
 
   out << "}\n";
 
-  if (globalUnfocused)
-    out << "document";
-  else {
+  if (globalUnfocused_) {
+    out << app->javaScriptClass() 
+      <<  "._p_.bindGlobal('" << std::string(eventName) <<"', '" << id_ << "', f" << fid 
+      << ")\n";
+    return;
+  } else {
     declare(out);
     out << var_;
   }
@@ -938,7 +931,7 @@ void DomElement::asHTML(EscapeOStream& out,
     for (EventHandlerMap::const_iterator i = eventHandlers_.begin();
 	 i != eventHandlers_.end(); ++i) {
       if (!i->second.jsCode.empty()) {
-	if (id_ == app->domRoot()->id()
+	if (globalUnfocused_ 
 	    || (i->first == WInteractWidget::WHEEL_SIGNAL
 		&& app->environment().agentIsIE() && app->environment().agent() >= WEnvironment::IE9))
 	  setJavaScriptEvent(javaScript, i->first, i->second, app);
@@ -1002,8 +995,10 @@ void DomElement::asHTML(EscapeOStream& out,
       if (type_ != DomElement_TEXTAREA) {
 	out << " value=";
 	fastHtmlAttributeValue(out, attributeValues, i->second);
-      } else
-	innerHTML += i->second;
+      } else {
+	std::string v = i->second;
+  innerHTML += WWebWidget::escapeText(v, false);
+      }
       break;
     case PropertySrc:
       out << " src=";
@@ -1023,6 +1018,10 @@ void DomElement::asHTML(EscapeOStream& out,
       break;
     case PropertyLabel:
       out << " label=";
+      fastHtmlAttributeValue(out, attributeValues, i->second);
+      break;
+    case PropertyPlaceholder:
+      out << " placeholder=";
       fastHtmlAttributeValue(out, attributeValues, i->second);
       break;
     default:
@@ -1393,7 +1392,7 @@ std::string DomElement::asJavaScript(EscapeOStream& out,
     renderInnerHtmlJS(out, app);
 
     for (unsigned i = 0; i < childrenToSave_.size(); ++i)
-      out << "$('#" << childrenToSave_[i] << "').replaceWith(c"
+      out << WT_CLASS ".replaceWith('" << childrenToSave_[i] << "',c"
 	  << var_ << (int)i << ");";
 
     // Fix for http://redmine.emweb.be/issues/1847: custom JS
@@ -1610,6 +1609,15 @@ void DomElement::setJavaScriptProperties(EscapeOStream& out,
       fastJsStringLiteral(out, escaped, i->second);
       out << ';';
       break;
+    case PropertyPlaceholder:
+      out << var_ << ".placeholder=";
+      if (!pushed) {
+	escaped.pushEscape(EscapeOStream::JsStringLiteralSQuote);
+	pushed = true;
+      }
+      fastJsStringLiteral(out, escaped, i->second);
+      out << ';';
+      break;
     case PropertyClass:
       out << var_ << ".className=";
       if (!pushed) {
@@ -1730,6 +1738,11 @@ std::string DomElement::tagName(DomElementType type)
 const std::string& DomElement::cssName(Property property)
 {
   return cssNames_[property - PropertyStylePosition];
+}
+
+void DomElement::setGlobalUnfocused(bool b)
+{
+  globalUnfocused_ = b;
 }
 
 

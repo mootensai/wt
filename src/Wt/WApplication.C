@@ -166,8 +166,8 @@ WApplication::WApplication(const WEnvironment& env
   }
 
   domRoot_ = new WContainerWidget();
+  domRoot_->setGlobalUnfocused(true);
   domRoot_->setStyleClass("Wt-domRoot");
-  domRoot_->load();
 
   if (session_->type() == Application)
     domRoot_->resize(WLength::Auto, WLength(100, WLength::Percentage));
@@ -188,7 +188,6 @@ WApplication::WApplication(const WEnvironment& env
     ajaxMethod_ = DynamicScriptTag;
 
     domRoot2_ = new WContainerWidget();
-    domRoot2_->load();
     widgetRoot_ = 0;
   }
 
@@ -1001,7 +1000,7 @@ void WApplication::redirectToSession(const std::string& newSessionId)
   std::string redirectUrl = bookmarkUrl();
   if (!session_->useUrlRewriting()) {
     std::string cookieName = environment().deploymentPath();
-    setCookie(cookieName, newSessionId, -1);
+    setCookie(cookieName, newSessionId, -1, "", "", environment().urlScheme() == "https");
   } else
     redirectUrl += "?wtd=" + DomElement::urlEncodeS(newSessionId);
 
@@ -1115,6 +1114,18 @@ void WApplication::addMetaHeader(const std::string& name,
 				 const std::string& lang)
 {
   addMetaHeader(MetaName, name, content, lang);
+}
+
+WString WApplication::metaHeader(MetaHeaderType type, const std::string& name) const
+{
+  for (unsigned i = 0; i < metaHeaders_.size(); ++i) {
+    const MetaHeader& m = metaHeaders_[i];
+
+    if (m.type == type && m.name == name)
+      return m.content;
+  }
+
+  return WString::Empty;
 }
 
 void WApplication::addMetaHeader(MetaHeaderType type,

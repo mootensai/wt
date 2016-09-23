@@ -32,6 +32,8 @@ public:
    */
   WDateEdit(WContainerWidget *parent = 0);
 
+  virtual ~WDateEdit();
+
   /*! \brief Sets the date.
    *
    * Does nothing if the current date is \p Null.
@@ -121,6 +123,8 @@ public:
    */
   virtual void setHidden(bool hidden,
 			 const WAnimation& animation = WAnimation());
+
+  virtual void load();
 
 protected:
   virtual void render(WFlags<RenderFlag> flags);

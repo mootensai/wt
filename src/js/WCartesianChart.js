@@ -174,6 +174,7 @@ WT_DECLARE_WT_MEMBER
    /*const*/ var SERIES_SELECTION_TIMEOUT = 200; // ms
    /*const*/ var TRANSFORM_CHANGED_TIMEOUT = 250; // ms
    /*const*/ var TOOLTIP_TIMEOUT = 500; // ms
+   /*const*/ var TOOLTIP_HIDE_DELAY = 200; // ms
    
    /*const*/ var FRICTION_FACTOR = 0.003, // Determines how strongly the speed decreases, when animating
        SPRING_CONSTANT = 0.0002, // How strongly the spring pulls, relative to how extended it is
@@ -308,20 +309,26 @@ WT_DECLARE_WT_MEMBER
    var seriesSelectionTimeout = null;
    var lastDate = null;
 
-   var tooltipTimeout = null;
-   var tooltipPosition = null;
-   var tooltipOuterDiv = null;
-   var tooltipEl = null;
+   var tobj = jQuery.data(widget, 'tobj');
+   if (!tobj) {
+      tobj = {overTooltip:false};
+      jQuery.data(widget, 'tobj', tobj);
+   }
 
    function hideTooltip() {
-      if (tooltipTimeout) {
-	 clearTimeout(tooltipTimeout);
-	 tooltipTimeout = null;
+      if (!tobj)
+	 return;
+      if (tobj.tooltipTimeout) {
+	 clearTimeout(tobj.tooltipTimeout);
+	 tobj.tooltipTimeout = null;
       }
-      if (tooltipOuterDiv) {
-	 document.body.removeChild(tooltipOuterDiv);
-	 tooltipEl = null;
-	 tooltipOuterDiv = null;
+      if (tobj.overTooltip) {
+	 return;
+      }
+      if (tobj.tooltipOuterDiv) {
+	 document.body.removeChild(tobj.tooltipOuterDiv);
+	 tobj.tooltipEl = null;
+	 tobj.tooltipOuterDiv = null;
       }
    }
 
@@ -428,6 +435,11 @@ WT_DECLARE_WT_MEMBER
 
    function repaint() {
       hideTooltip();
+      if (hasToolTips() && tobj.tooltipPosition) {
+	 tobj.tooltipTimeout = setTimeout(function() {
+	    loadTooltip();
+	 }, TOOLTIP_TIMEOUT);
+      }
       if (!paintEnabled) return;
       rqAnimFrameThrottled(function(){
 	 target.repaint();
@@ -566,7 +578,7 @@ WT_DECLARE_WT_MEMBER
    }
 
    function loadTooltip() {
-      APP.emit(target.widget, "loadTooltip", tooltipPosition[X], tooltipPosition[Y]);
+      APP.emit(target.widget, "loadTooltip", tobj.tooltipPosition[X], tobj.tooltipPosition[Y]);
    }
    
    /* const */ var MouseDistance = 10;
@@ -574,21 +586,31 @@ WT_DECLARE_WT_MEMBER
    this.updateTooltip = function(contents) {
       hideTooltip();
       if (contents) {
-	 var toolTipEl = document.createElement('div');
-	 toolTipEl.className = config.ToolTipInnerStyle;
-	 toolTipEl.innerHTML = contents;
+	 if (!tobj.tooltipPosition) {
+	    return;
+	 }
+	 tobj.toolTipEl = document.createElement('div');
+	 tobj.toolTipEl.className = config.ToolTipInnerStyle;
+	 tobj.toolTipEl.innerHTML = contents;
 
-	 tooltipOuterDiv = document.createElement('div');
-	 tooltipOuterDiv.className = config.ToolTipOuterStyle;
+	 tobj.tooltipOuterDiv = document.createElement('div');
+	 tobj.tooltipOuterDiv.className = config.ToolTipOuterStyle;
 
-	 document.body.appendChild(tooltipOuterDiv);
-	 tooltipOuterDiv.appendChild(toolTipEl);
+	 document.body.appendChild(tobj.tooltipOuterDiv);
+	 tobj.tooltipOuterDiv.appendChild(tobj.toolTipEl);
 	 var c = WT.widgetPageCoordinates(target.canvas);
 
-	 var x = tooltipPosition[X] + c.x;
-	 var y = tooltipPosition[Y] + c.y;
-	 WT.fitToWindow(tooltipOuterDiv, x + MouseDistance, y + MouseDistance,
+	 var x = tobj.tooltipPosition[X] + c.x;
+	 var y = tobj.tooltipPosition[Y] + c.y;
+	 WT.fitToWindow(tobj.tooltipOuterDiv, x + MouseDistance, y + MouseDistance,
 	       x - MouseDistance, y - MouseDistance);
+
+	 $(tobj.toolTipEl).mouseenter(function() {
+	   tobj.overTooltip = true;
+	 });
+	 $(tobj.toolTipEl).mouseleave(function() {
+	   tobj.overTooltip = false;
+	 });
       }
    }
 
@@ -597,14 +619,14 @@ WT_DECLARE_WT_MEMBER
       // mousemove first, but we actually want to
       // handle it after pointer events.
       setTimeout(function() {
-         hideTooltip();
+	 setTimeout(hideTooltip, TOOLTIP_HIDE_DELAY);
          if (pointerActive) return;
 	 var c = WT.widgetCoordinates(target.canvas, event);
 	 if (!isPointInRect(c, configArea())) return;
 
-	 if (hasToolTips()) {
-	    tooltipPosition = [c.x,c.y];
-	    tooltipTimeout = setTimeout(function() {
+	 if (!tobj.tooltipEl && hasToolTips()) {
+	    tobj.tooltipPosition = [c.x,c.y];
+	    tobj.tooltipTimeout = setTimeout(function() {
 	       loadTooltip();
 	    }, TOOLTIP_TIMEOUT);
 	 }
@@ -617,7 +639,7 @@ WT_DECLARE_WT_MEMBER
    }
 
    this.mouseOut = function(o, event) {
-      hideTooltip();
+      setTimeout(hideTooltip, TOOLTIP_HIDE_DELAY);
    }
 
    this.mouseDown = function(o, event) {
@@ -639,20 +661,18 @@ WT_DECLARE_WT_MEMBER
       var c = WT.widgetCoordinates(target.canvas, event);
       if (!isPointInRect(c, configArea())) return;
       if (WT.buttons === 1) {
-	 if (curveManipulation()) {
+	 if (curveManipulation() && configSeries(configSelectedCurve())) {
 	    var curve = configSelectedCurve();
-	    if (configSeries(curve)) {
-	       var dy;
-	       if (isHorizontal()) {
-		  dy = c.x - dragPreviousXY.x;
-	       } else {
-		  dy = c.y - dragPreviousXY.y;
-	       }
-           assign(seriesTransform(curve),
-		     mult([1,0,0,1,0,dy / transform(Y)[3]],
-			  seriesTransform(curve)));
-	       repaint();
+	    var dy;
+	    if (isHorizontal()) {
+	       dy = c.x - dragPreviousXY.x;
+	    } else {
+	       dy = c.y - dragPreviousXY.y;
 	    }
+	    assign(seriesTransform(curve),
+		  mult([1,0,0,1,0,dy / transform(Y)[3]],
+		       seriesTransform(curve)));
+	    repaint();
 	 } else if (config.pan) {
 	    translate({
 	       x: c.x - dragPreviousXY.x,
@@ -728,8 +748,8 @@ WT_DECLARE_WT_MEMBER
 	       mult([1,0,0,s_y,0,middle-s_y*middle],
 	       seriesTransform(curve)));
 	    repaint();
+	    return;
 	 }
-	 return;
       }
       if ((action === WHEEL_PAN_X || action === WHEEL_PAN_Y || action === WHEEL_PAN_MATCHING) && config.pan) {
 	 var xBefore = transform(X)[4];
@@ -772,7 +792,9 @@ WT_DECLARE_WT_MEMBER
       APP.emit(target.widget, 'seriesSelected', dragPreviousXY.x, dragPreviousXY.y);
    }
 
-   touchHandlers.start = function(o, event) {
+   // fromDoubleTouch: indicates that this start of a touch comes from releasing of a double touch,
+   //                  so should not be interpreted for series selection
+   touchHandlers.start = function(o, event, fromDoubleTouch) {
       singleTouch = len(event.touches) === 1;
       doubleTouch = len(event.touches) === 2;
 
@@ -788,12 +810,18 @@ WT_DECLARE_WT_MEMBER
 	 lastDate = Date.now();
 	 dragPreviousXY = c;
 	 if (mode !== CROSSHAIR_MODE) {
-	    seriesSelectionTimeout = window.setTimeout(seriesSelected, SERIES_SELECTION_TIMEOUT);
+	    if (!fromDoubleTouch) {
+	      seriesSelectionTimeout = window.setTimeout(seriesSelected, SERIES_SELECTION_TIMEOUT);
+	    }
 	    addEventListener('contextmenu', eobj2.contextmenuListener);
 	 }
 	 WT.capture(null);
 	 WT.capture(target.canvas);
       } else if (doubleTouch && (config.zoom || curveManipulation())) {
+	 if (seriesSelectionTimeout) {
+	    window.clearTimeout(seriesSelectionTimeout);
+	    seriesSelectionTimeout = null;
+	 }
 	 animating = false;
 	touches = [
 	   WT.widgetCoordinates(target.canvas,event.touches[0]),
@@ -1003,7 +1031,7 @@ WT_DECLARE_WT_MEMBER
 	 }
 	 mode = null;
       } else if (singleTouch || doubleTouch)
-	 touchHandlers.start(o, event);
+	 touchHandlers.start(o, event, true);
    };
 
    var moveTimeout = null;
@@ -1027,7 +1055,7 @@ WT_DECLARE_WT_MEMBER
       // setTimeout prevents high animation velocity due to looking
       // at events that are further apart.
       if (!moveTimeout) moveTimeout = setTimeout(function(){
-        if (singleTouch && curveManipulation()) {
+        if (singleTouch && curveManipulation() && configSeries(configSelectedCurve())) {
 	   var curve = configSelectedCurve();
 	   if (configSeries(curve)) {
 	      var c = c1;
@@ -1062,7 +1090,7 @@ WT_DECLARE_WT_MEMBER
 	      translate(d, config.rubberBand ? DAMPEN : 0);
 	   }
 	   dragPreviousXY = c;
-	} else if (doubleTouch && curveManipulation()) {
+	} else if (doubleTouch && curveManipulation() && configSeries(configSelectedCurve())) {
 	   var yAxis = isHorizontal() ? X : Y;
 	   var newTouches = [ c1, c2 ].map(function(t){
 	      if (isHorizontal()) {
@@ -1304,7 +1332,7 @@ WT_DECLARE_WT_MEMBER
       notifyAreaChanged();
    }
 
-   this.setXRange = function(seriesNb, lowerBound, upperBound) {
+   this.setXRange = function(seriesNb, lowerBound, upperBound, updateYAxis) {
       lowerBound = modelArea()[0] + modelArea()[2] * lowerBound;
       upperBound = modelArea()[0] + modelArea()[2] * upperBound;
       //Constrain given range
@@ -1330,10 +1358,10 @@ WT_DECLARE_WT_MEMBER
       var crosshairBefore = toModelCoord(crosshair);
 
       transform(X)[0] = xZoom;
-      if (yZoom)
+      if (yZoom && updateYAxis)
           transform(Y)[3] = yZoom;
       transform(X)[4] = -panPoint[X] * xZoom;
-      if (yZoom)
+      if (yZoom && updateYAxis)
           transform(Y)[5] = -panPoint[Y] * yZoom;
       setTransformChangedTimeout();
 

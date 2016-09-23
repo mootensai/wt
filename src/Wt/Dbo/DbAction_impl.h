@@ -69,7 +69,7 @@ void InitSchema::actId(ptr<C>& value, const std::string& name, int size,
 		    "Wt::Dbo::dbo_traits<C>::surrogateIdField() != 0");
 
   idField_ = true;
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
   idField_ = false;
 }
 
@@ -139,6 +139,8 @@ void InitSchema::actCollection(const CollectionRef<C>& field)
   mapping_.sets.push_back
     (Impl::SetInfo(joinTableName, field.type(), joinName, field.joinId(),
 		      field.fkConstraints()));
+  if (field.literalJoinId())
+    mapping_.sets.back().flags |= Impl::SetInfo::LiteralSelfId;
 }
 
     /*
@@ -293,8 +295,8 @@ void LoadDbAction<C>::visit(C& obj)
     statement_->execute();
 
     if (!statement_->nextRow()) {
-      throw ObjectNotFoundException
-	(boost::lexical_cast<std::string>(dbo_.id()));
+      throw ObjectNotFoundException(session->template tableName<C>(), 
+				    boost::lexical_cast<std::string>(dbo_.id()));
     }
   }
 
@@ -324,7 +326,7 @@ template<class D>
 void LoadDbAction<C>::actId(ptr<D>& value, const std::string& name, int size,
 			    int fkConstraints)
 { 
-  actPtr(PtrRef<D>(value, name, size, fkConstraints));
+  actPtr(PtrRef<D>(value, name, fkConstraints));
 
   dbo_.setId(value);
 }
@@ -515,7 +517,9 @@ void SaveDbAction<C>::visit(C& obj)
 	MetaDbo<C>& dbo = static_cast< MetaDbo<C>& >(dbo_);
 	std::string idString = boost::lexical_cast<std::string>(dbo.id());
 
-	throw StaleObjectException(idString, dbo_.version());
+	throw StaleObjectException(idString, 
+				   dbo_.session()->template tableName<C>(), 
+				   dbo_.version());
       }
     }
   }
@@ -548,7 +552,7 @@ template<class D>
 void SaveDbAction<C>::actId(ptr<D>& value, const std::string& name, int size,
 			   int fkConstraints)
 { 
-  actPtr(PtrRef<D>(value, name, size, fkConstraints));
+  actPtr(PtrRef<D>(value, name, fkConstraints));
 
   /* Later, we may also want to support id changes ? */
   if (pass_ == Self && isInsert_)
@@ -576,7 +580,7 @@ template<class C>
 void TransactionDoneAction::actId(ptr<C>& value, const std::string& name,
 				  int size, int fkConstraints)
 { 
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
 }
 
 template<typename V>
@@ -637,7 +641,7 @@ template<class C>
 void SessionAddAction::actId(ptr<C>& value, const std::string& name,
 			     int size, int fkConstraints)
 { 
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
 }
 
 template<typename V>
@@ -682,7 +686,7 @@ template<class C>
 void SetReciproceAction::actId(ptr<C>& value, const std::string& name,
 			       int size, int fkConstraints)
 { 
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
 }
 
 template<typename V>
@@ -763,7 +767,7 @@ template<class C>
 void ToAnysAction::actId(ptr<C>& value, const std::string& name,
 			 int size, int fkConstraints)
 { 
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
 }
 
 template<typename V>
@@ -845,7 +849,7 @@ template<class C>
 void FromAnyAction::actId(ptr<C>& value, const std::string& name, int size,
 			  int fkConstraints)
 {
-  actPtr(PtrRef<C>(value, name, size, fkConstraints));
+  actPtr(PtrRef<C>(value, name, fkConstraints));
 }
 
 template<typename V>

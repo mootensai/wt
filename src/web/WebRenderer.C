@@ -106,7 +106,9 @@ WebRenderer::WebRenderer(WebSession& session)
     pageId_(0),
     expectedAckId_(0),
     scriptId_(0),
+    ackErrs_(0),
     linkedCssCount_(-1),
+    currentStatelessSlotIsActuallyStateless_(true),
     formObjectsChanged_(true),
     updateLayout_(false),
     learning_(false)
@@ -209,11 +211,12 @@ bool WebRenderer::ackUpdate(int updateId)
   if (updateId == expectedAckId_) {
     LOG_DEBUG("jsSynced(false) after ackUpdate okay");
     setJSSynced(false);
-    ++expectedAckId_;
+    ackErrs_ = 0;
     return true;
   } else if ((updateId < expectedAckId_ && expectedAckId_ - updateId < 5)
 	     || (expectedAckId_ - 5 < updateId)) {
-    return true; // That's still acceptible but no longer plausible
+    ++ackErrs_;
+    return ackErrs_ < 3; // That's still acceptible but no longer plausible
   } else
     return false;
 }
@@ -341,6 +344,7 @@ void WebRenderer::streamBootContent(WebResponse& response,
   bootJs.setVar("SESSION_ID", session_.sessionId());
 
   expectedAckId_ = scriptId_ = WRandom::get();
+  ackErrs_ = 0;
 
   bootJs.setVar("SCRIPT_ID", scriptId_);
   bootJs.setVar("RANDOMSEED", WRandom::get());
@@ -350,7 +354,7 @@ void WebRenderer::streamBootContent(WebResponse& response,
   bootJs.setVar("AJAX_CANONICAL_URL",
 		safeJsStringLiteral(session_.ajaxCanonicalUrl(response)));
   bootJs.setVar("APP_CLASS", "Wt");
-  bootJs.setVar("PATH_INFO", WWebWidget::jsStringLiteral
+  bootJs.setVar("PATH_INFO", safeJsStringLiteral
 		(session_.pagePathInfo_));
 
   bootJs.setCondition("COOKIE_CHECKS", conf.cookieChecks());
@@ -686,7 +690,7 @@ void WebRenderer::addResponseAckPuzzle(WStringStream& out)
    * continue. TO BE DONE.
    */
   out << session_.app()->javaScriptClass()
-      << "._p_.response(" << expectedAckId_;
+      << "._p_.response(" << ++expectedAckId_;
   if (!puzzle.empty())
     out << "," << puzzle;
   out << ");";
@@ -883,6 +887,7 @@ void WebRenderer::serveMainscript(WebResponse& response)
     }
   } else {
     expectedAckId_ = scriptId_ = WRandom::get();
+    ackErrs_ = 0;
   }
 
   WApplication *app = session_.app();
@@ -967,10 +972,16 @@ void WebRenderer::serveMainscript(WebResponse& response)
      */
     std::string params;
     if (session_.type() == WidgetSet) {
-      const Http::ParameterMap& m = session_.env().getParameterMap();
-
-      for (Http::ParameterMap::const_iterator i = m.begin();
-	   i != m.end(); ++i) {
+      const Http::ParameterMap *m = &session_.env().getParameterMap();
+      Http::ParameterMap::const_iterator it = m->find("Wt-params");
+      Http::ParameterMap wtParams;
+      if (it != m->end()) {
+	// Parse and reencode Wt-params, so it's definitely safe
+	Http::Request::parseFormUrlEncoded(it->second[0], wtParams);
+	m = &wtParams;
+      }
+      for (Http::ParameterMap::const_iterator i = m->begin();
+	   i != m->end(); ++i) {
 	if (!params.empty())
 	  params += '&';
 	params
@@ -1789,10 +1800,15 @@ void WebRenderer::preLearnStateless(WApplication *app, WStringStream& out)
 
 std::string WebRenderer::learn(WStatelessSlot* slot)
 {
+  if (slot->invalidated())
+    return std::string();
+
   if (slot->type() == WStatelessSlot::PreLearnStateless)
     learning_ = true;
 
   learningIncomplete_ = false;
+
+  currentStatelessSlotIsActuallyStateless_ = true;
 
   slot->trigger();
 
@@ -1813,8 +1829,11 @@ std::string WebRenderer::learn(WStatelessSlot* slot)
     statelessJS_ << result;
   }
 
-  if (!learningIncomplete_)
+  if (currentStatelessSlotIsActuallyStateless_ && !learningIncomplete_) {
     slot->setJavaScript(result);
+  } else if (!currentStatelessSlotIsActuallyStateless_) {
+    slot->invalidate();
+  }
 
   collectJS(&statelessJS_);
 

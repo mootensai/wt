@@ -62,7 +62,8 @@ WTableView::WTableView(WContainerWidget *parent)
     viewportTop_(0),
     viewportHeight_(UNKNOWN_VIEWPORT_HEIGHT),
     scrollToRow_(-1),
-    scrollToHint_(EnsureVisible)
+    scrollToHint_(EnsureVisible),
+    columnResizeConnected_(false)
 {
   setSelectable(false);
 
@@ -96,16 +97,16 @@ WTableView::WTableView(WContainerWidget *parent)
     canvas_->setPositionScheme(Relative);
     canvas_->clicked()
       .connect(boost::bind(&WTableView::handleSingleClick, this, false, _1));
-
-	canvas_->clicked().connect(
-		"function(o, e) { "
-		  "$(document).trigger('click', e);"
-		"}");
-
+    canvas_->clicked().connect("function(o, e) { "
+			       "$(document).trigger('click', e);"
+			       "}");
     canvas_->clicked().preventPropagation();
     canvas_->mouseWentDown()
       .connect(boost::bind(&WTableView::handleMouseWentDown, this, false, _1)); 
     canvas_->mouseWentDown().preventPropagation();
+    canvas_->mouseWentDown().connect("function(o, e) { "
+				     "$(document).trigger('mousedown', e);"
+				     "}");
     canvas_->mouseWentUp()
       .connect(boost::bind(&WTableView::handleMouseWentUp, this, false, _1)); 
     canvas_->mouseWentUp().preventPropagation();
@@ -747,6 +748,11 @@ void WTableView::defineJavaScript()
   if (!scrolled_.isConnected())
     scrolled_.connect(this, &WTableView::onViewportChange);
 
+  if (!columnResizeConnected_) {
+    columnResized().connect(this, &WTableView::onColumnResize);
+    columnResizeConnected_ = true;
+  }
+
   if (viewportTop_ != 0) {
     WStringStream s;
     s << "function(o, w, h) {"
@@ -1144,21 +1150,24 @@ void WTableView::setRowHeight(const WLength& rowHeight)
 {
   int renderedRowCount = model() ? lastRow() - firstRow() + 1 : 0;
 
-  WAbstractItemView::setRowHeight(rowHeight);
+  // Avoid floating point error which might lead to incorrect viewport calculation
+  WLength len = WLength((int)rowHeight.toPixels()); 
+
+  WAbstractItemView::setRowHeight(len);
 
   if (ajaxMode()) {
-    canvas_->setLineHeight(rowHeight);
-    headerColumnsCanvas_->setLineHeight(rowHeight);
+    canvas_->setLineHeight(len);
+    headerColumnsCanvas_->setLineHeight(len);
 
     if (model()) {
       double ch = canvasHeight();
       canvas_->resize(canvas_->width(), ch);
       headerColumnsCanvas_->setHeight(ch);
-      double th = renderedRowCount * rowHeight.toPixels();
+      double th = renderedRowCount * len.toPixels();
       setRenderedHeight(th);
     }
   } else { // Plain HTML mode
-    plainTable_->setLineHeight(rowHeight);
+    plainTable_->setLineHeight(len);
     resize(width(), height());
   }
 
@@ -1508,6 +1517,13 @@ void WTableView::onViewportChange(int left, int top, int width, int height)
   computeRenderedArea();
 
   scheduleRerender(NeedAdjustViewPort);  
+}
+
+void WTableView::onColumnResize()
+{
+  computeRenderedArea();
+
+  scheduleRerender(NeedAdjustViewPort);
 }
 
 void WTableView::computeRenderedArea()

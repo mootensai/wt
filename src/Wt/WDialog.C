@@ -44,8 +44,9 @@ public:
   void pushDialog(WDialog *dialog, const WAnimation& animation) {
     dialogs_.push_back(dialog);
 
-    if (dialog->isModal())
+    if (dialog->isModal()) {
       coverFor(dialog, animation);
+    }
 
     scheduleRender();
   }
@@ -111,6 +112,7 @@ private:
   void coverFor(WDialog *dialog, const WAnimation& animation) {
     if (dialog) {
       if (isHidden()) {
+
 	if (!animation.empty())
 	  animateShow(WAnimation(WAnimation::Fade, WAnimation::Linear,
 				 animation.duration() * 4));
@@ -119,6 +121,12 @@ private:
 
 	WApplication::instance()->pushExposedConstraint(this);
       }
+	
+      dialog->doJavaScript("setTimeout(function() {"
+       + WApplication::instance()->javaScriptClass() 
+       + "._p_.updateGlobal('" + dialog->layoutContainer_->id() + "') }"
+       ", 0);"
+       );
 
       setZIndex(dialog->zIndex() - 1);
 
@@ -127,6 +135,10 @@ private:
       WApplication *app = WApplication::instance();
       app->theme()->apply(app->domRoot(), this, DialogCoverRole);
     } else {
+	//call updateGlobal(null)
+      WApplication::instance()->doJavaScript("setTimeout(function() {"
+	    + WApplication::instance()->javaScriptClass() 
+	    + "._p_.updateGlobal(null) });");
       if (!isHidden()) {
 	if (!animation.empty())
 	  animateHide(WAnimation(WAnimation::Fade, WAnimation::Linear,
@@ -256,13 +268,14 @@ void WDialog::create()
 
   LOAD_JAVASCRIPT(app, "js/WDialog.js", "WDialog", wtjs1);
 
-  WContainerWidget *layoutContainer = new WContainerWidget();
-  wApp->theme()->apply(this, layoutContainer, DialogContent);
-  layoutContainer->addStyleClass("dialog-layout");
-  WVBoxLayout *layout = new WVBoxLayout(layoutContainer);
+  layoutContainer_ = new WContainerWidget();
+  layoutContainer_->setGlobalUnfocused(true);
+  wApp->theme()->apply(this, layoutContainer_, DialogContent);
+  layoutContainer_->addStyleClass("dialog-layout");
+  WVBoxLayout *layout = new WVBoxLayout(layoutContainer_);
   layout->setContentsMargins(0, 0, 0, 0);
   layout->setSpacing(0);
-  impl_->bindWidget("layout", layoutContainer);
+  impl_->bindWidget("layout", layoutContainer_);
 
   titleBar_ = new WContainerWidget();
   app->theme()->apply(this, titleBar_, DialogTitleBarRole);
@@ -296,6 +309,8 @@ void WDialog::create()
   } else
     setPositionScheme(app->environment().agent() == WEnvironment::IE6
 		      ? Absolute : Fixed);
+
+  setMovable(true);
 }
 
 WDialog::~WDialog()
@@ -341,6 +356,13 @@ void WDialog::setResizable(bool resizable)
   }
 }
 
+void WDialog::setMovable(bool movable)
+{
+  movable_ = movable;
+
+  layoutContainer_->toggleStyleClass("movable", movable_);
+}
+
 void WDialog::setMaximumSize(const WLength& width, const WLength& height)
 {
   WPopupWidget::setMaximumSize(width, height);
@@ -380,6 +402,7 @@ void WDialog::render(WFlags<RenderFlag> flags)
     doJavaScript("new " WT_CLASS ".WDialog("
 		 + app->javaScriptClass() + "," + jsRef()
 		 + "," + titleBar_->jsRef()
+		 + "," + (movable_ ? "1" : "0")
 		 + "," + (centerX ? "1" : "0")
 		 + "," + (centerY ? "1" : "0") 
 		 + "," + (moved_.isConnected()
@@ -577,7 +600,7 @@ void WDialog::setHidden(bool hidden, const WAnimation& animation)
       }
 
       if (escapeIsReject_) {
-	escapeConnection1_ = app->globalEscapePressed()
+	escapeConnection1_ = escapePressed()
 	  .connect(this, &WDialog::onEscapePressed);
 
 	escapeConnection2_ = impl_->escapePressed()
@@ -661,6 +684,31 @@ void WDialog::raiseToFront()
   doJavaScript("jQuery.data(" + jsRef() + ", 'obj').bringToFront()");
   DialogCover *c = cover();
   c->bringToFront(this);  
+}
+
+EventSignal<WKeyEvent>& WDialog::keyWentDown()
+{
+  return layoutContainer_->keyWentDown();
+}
+
+EventSignal<WKeyEvent>& WDialog::keyWentUp()
+{
+  return layoutContainer_->keyWentUp();
+}
+
+EventSignal<WKeyEvent>& WDialog::keyPressed()
+{
+  return layoutContainer_->keyPressed();
+}
+
+EventSignal<>& WDialog::enterPressed()
+{
+  return layoutContainer_->enterPressed();
+}
+
+EventSignal<>& WDialog::escapePressed()
+{
+  return layoutContainer_->escapePressed();
 }
 
 }

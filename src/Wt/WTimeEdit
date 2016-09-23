@@ -30,6 +30,8 @@ public:
      */
     WTimeEdit(WContainerWidget *parent = 0);
 
+    virtual ~WTimeEdit();
+
     /*! \brief Sets the time
      *
      *  Does nothing if the current time is \p Null.
@@ -79,6 +81,8 @@ public:
     /*! \brief Returns the upper limit of the valid time range
      */
     WTime top() const;
+
+    virtual void load();
 
 protected:
     virtual void render(WFlags<RenderFlag> flags);

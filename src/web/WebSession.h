@@ -83,7 +83,7 @@ public:
   WEnvironment&  env() { return *env_; }
   WApplication  *app() { return app_; }
   WebRenderer&   renderer() { return renderer_; }
-  bool useUrlRewriting() { return useUrlRewriting_; }
+  bool useUrlRewriting();
 
   bool debug() const { return debug_; }
 
@@ -129,8 +129,7 @@ public:
    */
 
   const std::string& applicationName() const { return applicationName_; }
-  const std::string applicationUrl() const
-    { return applicationUrl_ + sessionQuery(); }
+  const std::string applicationUrl() const { return applicationUrl_; }
   const std::string& deploymentPath() const { return deploymentPath_; }
 
   bool hasSessionIdInUrl() const { return sessionIdInUrl_; }
@@ -280,7 +279,6 @@ private:
   std::string favicon_;
   State state_;
 
-  bool useUrlRewriting_;
   std::string sessionId_, sessionIdCookie_;
   bool sessionIdChanged_, sessionIdCookieChanged_, sessionIdInUrl_;
 

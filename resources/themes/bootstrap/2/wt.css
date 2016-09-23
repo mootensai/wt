@@ -138,7 +138,7 @@
 /*
  * Dialog extensions
  */
-.modal .modal-header {
+.modal .movable .modal-header {
   cursor: move;
 }
 .modal .modal-body .modal-footer {
@@ -557,7 +557,7 @@
 .dropdown-menu.typeahead {
   cursor: pointer;
 }
-.dropdown-menu.typeahead li > a:hover {
+.dropdown-menu.typeahead li:not(.active) > a:hover {
   color: inherit;
   background: inherit;
 }
